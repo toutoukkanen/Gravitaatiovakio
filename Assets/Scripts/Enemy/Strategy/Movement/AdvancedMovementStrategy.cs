@@ -25,10 +25,11 @@ namespace Enemy
         // Also try to find obstacles and avoid them
         public override Vector2 Move()
         {
-            var position = context.GetTransform().position;
+            var position = context.Transform.position;
             
-            var playerToEnemy =  position - context.GetPlayerPos();
+            var playerToEnemy =  position - context.PlayerPos;
             
+            // Some enemies can go around the player in a circular motion
             if (_moveAroundFactor != 0)
             {
                 playerToEnemy = Quaternion.Euler(0, 0, _moveAroundFactor) * playerToEnemy;
@@ -37,12 +38,12 @@ namespace Enemy
                 _moveAroundFactor += _initialMoveAroundFactor;
             }
             
-            var optimalPlayerToEnemy = (Vector2) (context.GetPlayerPos() + playerToEnemy.normalized * optimalDistance);
+            var optimalPlayerToEnemy = (Vector2) (context.PlayerPos + playerToEnemy.normalized * optimalDistance);
             
-            // If there is debris on the way, shift course
             var maxEvadeAngle = 90;
             var evadeStep = 15;
 
+            // If there is debris or other obstacles in the way, shift course
             if (ShipPathObstructed(position, optimalPlayerToEnemy, LayerMask.GetMask("Default", "Player")))
             {
                 
@@ -82,7 +83,7 @@ namespace Enemy
             
             // TODO: Check directly ahead if we are on "törmäyskurssi"
             
-            var acceleration = (2 * optimalPlayerToEnemy - 2 * (Vector2) position - context.GetVelocity() * (2 * accelerationTime)) / Mathf.Pow(accelerationTime,2);
+            var acceleration = (2 * optimalPlayerToEnemy - 2 * (Vector2) position - context.Velocity * (2 * accelerationTime)) / Mathf.Pow(accelerationTime,2);
             acceleration = Vector2.ClampMagnitude(acceleration, maxAcceleration);
 
             return acceleration;

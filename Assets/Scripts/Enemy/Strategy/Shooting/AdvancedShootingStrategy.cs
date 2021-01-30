@@ -43,9 +43,9 @@ namespace Enemy
             
             var weaponTransform = weapon.ActualWeaponTransform;
             
-            var playerVelocity = context.GetPlayerRigidbody2D().velocity;
+            var playerVelocity = context.PlayerRigidbody2D.velocity;
             
-            var predictedPlayerPosition = context.GetPlayerPos();
+            var predictedPlayerPosition = context.PlayerPos;
 
             var weaponToPredictedPlayer = predictedPlayerPosition - weaponTransform.position;
             
@@ -72,11 +72,11 @@ namespace Enemy
 
                     //Debug.Log(predictedWeaponAlignment);
                         
-                    if (DoesHit(weaponTransform.position, context.GetPlayerPos(), predictedWeaponAlignment * weapon.ProjectileSpeed + context.GetVelocity(), playerVelocity, t))
+                    if (DoesHit(weaponTransform.position, context.PlayerPos, predictedWeaponAlignment * weapon.ProjectileSpeed + context.Velocity, playerVelocity, t))
                     {
                         //Debug.Log("Precise instruction found! Angle:  " + angleModifier + ", Time: " + t);
                             
-                        var angleShipToWeapon = Vector3.SignedAngle(context.GetTransform().up, weaponTransform.up, Vector3.forward);
+                        var angleShipToWeapon = Vector3.SignedAngle(context.Transform.up, weaponTransform.up, Vector3.forward);
 
                         var lerpAngle = 0f;
                         
@@ -109,7 +109,7 @@ namespace Enemy
             
             // If precise prediction failed, just aim the barrel in some way to the player
             
-            var basicAngleShipToWeapon = Vector3.SignedAngle(context.GetTransform().up, weaponTransform.up, Vector3.forward);
+            var basicAngleShipToWeapon = Vector3.SignedAngle(context.Transform.up, weaponTransform.up, Vector3.forward);
 
             // Clamp rotation. Prevent from going over
             if (basicAngleShipToWeapon + angle > weapon.MAXTurnAngle || basicAngleShipToWeapon + angle < -weapon.MAXTurnAngle)

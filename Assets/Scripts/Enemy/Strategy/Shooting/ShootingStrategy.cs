@@ -25,12 +25,12 @@ namespace Enemy
             var weaponTransform = weapon.ActualWeaponTransform;
             var weaponTransformUp = weaponTransform.up;
             
-            var predictedPlayerPosition = context.GetPlayerPos() + (Vector3) context.GetPlayerRigidbody2D().velocity * predictModifier;
+            var predictedPlayerPosition = context.PlayerPos + (Vector3) context.PlayerRigidbody2D.velocity * predictModifier;
             var weaponToPredictedPlayer = predictedPlayerPosition - weaponTransform.position;
 
             var predictedAngle = Vector3.SignedAngle(weaponTransformUp, weaponToPredictedPlayer, Vector3.forward);
             
-            var angleShipToWeapon = Vector3.SignedAngle(context.GetTransform().up, weaponTransformUp, Vector3.forward);
+            var angleShipToWeapon = Vector3.SignedAngle(context.Transform.up, weaponTransformUp, Vector3.forward);
 
             // Clamp rotation. Prevent from going over
             if (angleShipToWeapon + predictedAngle > weapon.MAXTurnAngle || angleShipToWeapon + predictedAngle < -weapon.MAXTurnAngle)

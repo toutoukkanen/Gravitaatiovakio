@@ -30,17 +30,17 @@ namespace Enemy
         // Properties for fields to implement IContext. Used to give strategies the necessary info
         
         // Ship
-        public Transform GetTransform() => transform;
-        public Vector2 GetVelocity() => _rigidbody2D.velocity;
-        public float GetAngularVelocity() => _rigidbody2D.angularVelocity;
+        public Transform Transform => transform;
+        public Vector2 Velocity => _rigidbody2D.velocity;
+        public float AngularVelocity => _rigidbody2D.angularVelocity;
 
         // Weapons
-        public List<Weapon> GetWeapons() => _section.weapons;
+        public List<Weapon> Weapons => _section.weapons;
 
         // Player
-        public Vector3 GetPlayerPos() => player.transform.position;
+        public Vector3 PlayerPos => player.transform.position;
 
-        public Rigidbody2D GetPlayerRigidbody2D() => _playerRigidbody2D;
+        public Rigidbody2D PlayerRigidbody2D => _playerRigidbody2D;
 
         // Events
         public event EventHandler EnemyDestroyed; 
@@ -60,14 +60,8 @@ namespace Enemy
             // Send the MonoBehaviour to strategy through the specific IContext
             // It would be catastrophic for strategies to access a MonoBehaviour directly
             // If there is a preferred strategy for enemy, override it in child
-            //movementStrategy ??= new MovementStrategy(this); // C#8 only
-            //shootingStrategy ??= new ShootingStrategy(this);
-            
-            if(movementStrategy == null)
-                movementStrategy = new MovementStrategy(this);
-            
-            if(shootingStrategy == null)
-                shootingStrategy = new ShootingStrategy(this);
+            movementStrategy ??= new MovementStrategy(this);
+            shootingStrategy ??= new ShootingStrategy(this);
             
             Invoke(nameof(EnableFighting), shootingEnabledTimer);
         }
