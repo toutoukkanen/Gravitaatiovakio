@@ -131,6 +131,11 @@ PrefabInstance:
   m_Modification:
     m_TransformParent: {fileID: 0}
     m_Modifications:
+    - target: {fileID: 438744238809478118, guid: b0f024fe5a9c5964985e6b997020d39d,
+        type: 3}
+      propertyPath: m_IsActive
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 8343566857262464430, guid: b0f024fe5a9c5964985e6b997020d39d,
         type: 3}
       propertyPath: m_Name
@@ -593,7 +598,7 @@ MonoBehaviour:
   zoomInSpeed: 0.2
   zoomOutSpeed: 1
   zoomInTimer: 3
-  maxCameraSize: 25
+  maxCameraSize: 14
   followSpeed: 2
   recoil: {x: 0, y: 0, z: 0}
 --- !u!81 &500076077
@@ -854,6 +859,11 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Name
       value: Section
+      objectReference: {fileID: 0}
+    - target: {fileID: 8225569574234188410, guid: 32397657b20bcc4f88f6e27f831df942,
+        type: 3}
+      propertyPath: m_IsActive
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 8225569574234188411, guid: 32397657b20bcc4f88f6e27f831df942,
         type: 3}

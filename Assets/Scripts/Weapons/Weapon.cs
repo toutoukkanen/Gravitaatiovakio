@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace Weapons
 {
-    public abstract class Weapon : MonoBehaviour //, IWeapon
+    public abstract class Weapon : MonoBehaviour
     {
         protected Rigidbody2D _parentRigidBody2D; // Rigidbody at the core
         protected AudioSource _audioSource;
@@ -26,10 +26,9 @@ namespace Weapons
         [SerializeField] protected float turningSpeed = 1f; // Turning speed scales with Time.deltaTime
         [SerializeField] protected float maxTurnAngle = 45f;
     
-        // Implement IWeapon properties
         public bool ONCooldown { get; set; }
     
-        // Weapon might have base and a barrel which is the child
+        // Weapon might have base and a rotating barrel which is the child
         public Transform ActualWeaponTransform { get; protected set; }
 
         public GameObject ProjectilePrefab
