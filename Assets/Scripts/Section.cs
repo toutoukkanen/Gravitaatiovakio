@@ -23,75 +23,60 @@ public readonly struct ObjectDimensions
     }
 }
 
-// Nodes represent a piece of a section. Node's gameobject is active when center value is 1. Otherwise 0.
-// Each gameobject's node can be found with a dictionary
-// Don't have to deal with horrible nulls when traversing trough nodes.
-[Serializable]
-public struct Node
+// Nodes represent a block of a section which has references to all the blocks around it
+// Each Node can be found with the Transform to Node dictionary or with the Section's list of nodes
+public class Node
 {
-    public Transform centerTransform;
-    private Vector2 centerTransformPosition; // Save a copy of the initial position for equality checks
+    public readonly Transform transform;
     
-    public Transform[] neighbourTransforms;
-    [SerializeField] public bool[] neighbourExists; // Null safety and no cost of comparing UnityEngine.Object to null
+    // TODO: This might not be needed anymore
+    private readonly Vector2 transformPosition; // Save a copy of the initial position for equality checks
 
-    // Use a pre-evaluated null check to determine if neighbour is null or not
-    public bool DoesNeighbourExist(int index) => neighbourExists[index];
-
-    public Dictionary<Transform, int> indexOfNeighbour; // Fast lookup to the specific index when deleting neighbours
+    // A linked list going to 4 directions
+    // A node always has all 4 neighbours but only valid ones will be active
+    public Node[] Neighbours { get; private set; }
     
-    public Node(Transform centerTransform, Transform[] neighbourTransforms)
+    // Before anything is done with the node, isActive must be checked first
+    // Otherwise there won't be any savings because we have to perform a UnityEngine.Object null check
+    public bool active;
+
+    private static int _maxNeighbours = 4;
+
+    // Constructor for creating ghost Nodes to avoid tedious null checks
+    public Node() => active = false;
+    
+    public Node(Transform centerTransform, Node[] neighbours)
     {
-        this.centerTransform = centerTransform;
-        this.centerTransformPosition = centerTransform.position;
-        //this.centerExists = true; // When a node is created, it has to have a valid center transform
-
-        this.neighbourTransforms = neighbourTransforms;
+        this.transform = centerTransform;
+        this.transformPosition = centerTransform.position;
         
-        var length = neighbourTransforms.Length;
-        if(length > 4) // Maximum number of neighbors for a single 2d tile
+        this.Neighbours = neighbours;
+        
+        var length = neighbours.Length;
+        if(length > _maxNeighbours) // Maximum number of neighbors for a single 2d tile
             Debug.LogWarning("Node has " + length + " members!");
-
-        // Costly null checks are only ran when a node is created when section starts
-        neighbourExists = new bool[4];
-        indexOfNeighbour = new Dictionary<Transform, int>();
-        for (var i = 0; i < length; i++)
-        {
-            if (neighbourTransforms[i] == null)
-                neighbourExists[i] = false;
-            else
-            {
-                neighbourExists[i] = true;
-                indexOfNeighbour.Add(neighbourTransforms[i], i);
-            }
-        }
+        
+        active = true;
     }
+
+    // Neighbours should only be set when raycasting the section
+    public void SetNeighbours(Node[] neighbours) => this.Neighbours = neighbours;
     
-    public bool Equals(Node other)
-    {
-        return centerTransformPosition.Equals(other.centerTransformPosition);
-    }
+    public bool Equals(Node other) => transformPosition.Equals(other.transformPosition);
 
-    public override bool Equals(object obj)
-    {
-        return obj is Node other && Equals(other);
-    }
+    public override bool Equals(object obj) => obj is Node other && Equals(other);
 
-    public override int GetHashCode()
-    {
-        return centerTransformPosition.GetHashCode();
-    }
+    public override int GetHashCode() => transformPosition.GetHashCode();
     
-    // Determine equality if the nodes' transforms were in the same position at the start of raycasting
-    public static bool operator==(Node left, Node right) => left.centerTransformPosition == right.centerTransformPosition;
+    // Determine equality if the nodes' transforms were in the same position at the start of Node's creation
+    public static bool operator==(Node left, Node right) => left.transformPosition == right.transformPosition;
 
     public static bool operator !=(Node left, Node right) => !(left == right);
 }
 
 public class Section : MonoBehaviour
 {
-    // Uutta kalustoa
-    public List<Node> nodeMap;
+    private List<Node> nodes = new List<Node>();
     
     private Dictionary<Transform, Node> transformNodeDictionary = new Dictionary<Transform, Node>();
 
@@ -129,7 +114,8 @@ public class Section : MonoBehaviour
     
     public List<Weapon> weapons; // References removed in Weapon-script or here in recalculation
     
-    // Start is called before the first frame update
+    // Start is only called for new sections
+    // Already created and damaged sections must preserve valuable data such as max hp
     public void Start()
     {
         sectionPrefab = Resources.Load<GameObject>("Section");
@@ -144,6 +130,7 @@ public class Section : MonoBehaviour
         shipHp = 0f;
         
         // If parts exist, define the mass of the section and hp
+        // Also assemble the list of nodes
         foreach (var part in parts)
         {
             _rigidbody2D.mass += part.mass;
@@ -151,8 +138,12 @@ public class Section : MonoBehaviour
             
             // Assemble RigidBody2D dictionary
             partColliders.Add(part, part.GetComponent<PolygonCollider2D>());
+            
+            // Initialize list and dictionary with nodes. They will be all replaced later in the raycast
+            nodes.Add(new Node(part.transform, new Node[4]));
+            transformNodeDictionary.Add(part.transform, nodes.Last());
         }
-        // Assign the max hp
+        
         MaxShipHp = shipHp;
         
         // If there are weapons onboard, list them
@@ -200,25 +191,20 @@ public class Section : MonoBehaviour
         
         if (raycastOnStart)
         {
-            nodeMap = RaycastSection();
+            RaycastSection();
             raycastOnStart = false;
         }
     }
 
-    List<Node> RaycastSection()
+    // Defines legal structures and assembles the neighbours of every Node
+    void RaycastSection()
     {
-        var nodes = new List<Node>();
-        
         foreach (var part in parts)
         {
             //if (part != parts[1]) continue;
             
             var polygonCollider2D = partColliders[part];
             
-            //var collisionPoints = polygonCollider2D.points;
-            //RaycastHit2D hit = Physics2D.Linecast(transform.position, Vector2.up);
-            //var closestPoint = polygonCollider2D.ClosestPoint(part.transform.position + Vector3.up);
-
             var partTransform = part.transform;
             var up = partTransform.up;
             var right = partTransform.right;
@@ -229,7 +215,7 @@ public class Section : MonoBehaviour
             var colliderPointRight = polygonCollider2D.ClosestPoint(partPosition + right * colliderPointSearchLength);
             var colliderPointLeft = polygonCollider2D.ClosestPoint(partPosition - right * colliderPointSearchLength);
             
-            // Temporarily disable this part's collider for raycast for false positives
+            // Temporarily disable this part's collider for raycasting
             polygonCollider2D.enabled = false;
             
             int layerMask = LayerMask.GetMask(LayerMask.LayerToName(gameObject.layer));
@@ -237,7 +223,7 @@ public class Section : MonoBehaviour
             var hits = new List<RaycastHit2D>();
 
             // Draw rays for all 4 directions until collision point reached
-            // An exception for this is a triangle. Only raycast right and up
+            // An exception for this is a triangle. Only raycast non hypotenuse-sides
             if (partTransform.CompareTag("Triangle")) 
             {
                 Debug.DrawRay(colliderPointUp, up * raycastLength, Color.green, 10f);
@@ -259,15 +245,16 @@ public class Section : MonoBehaviour
                 hits.Add(Physics2D.Raycast(colliderPointLeft, -right, raycastLength, layerMask));
             }
             
-            polygonCollider2D.enabled = true; // Reenable collider
+            polygonCollider2D.enabled = true;
             
-            Transform[] neighbours = new Transform[4]; // One block has only 4 raycasts
+            Transform[] neighbourTransforms = new Transform[4]; // One block has only 4 raycasts
+            
+            // Every node has 4 neighbours even if there really isn't that much. Initialize array with ghost neighbours
+            Node[] neighbourNodes = new Node[4] {new Node(), new Node(), new Node(), new Node()};
 
             for (var i = 0; i < hits.Count; i++)
             {
                 var hit = hits[i];
-                // Projectiles can be on the same layer so check if the hit root is the same
-                //if (hit.collider != null && hit.collider.transform.root == gameObject.transform.root)
                 if (hit.collider != null && hit.collider.gameObject.layer == gameObject.layer
                                          && hit.collider.transform.root == gameObject.transform.root)
                 {
@@ -275,19 +262,17 @@ public class Section : MonoBehaviour
                     //Debug.DrawLine(Vector3.zero, hit.collider.transform.position, Color.red, 10f);
                     //gameObjects.Add(hit.collider.transform.gameObject);
                     
-                    neighbours[i] = hits[i].collider.transform;
+                    var hitColliderTransform = hits[i].collider.transform;
+                    
+                    neighbourTransforms[i] = hitColliderTransform;
+                    neighbourNodes[i] = transformNodeDictionary[hitColliderTransform]; // All transforms are linked at start()
                 }
             }
             
-            // Create a new node
-            // Also assemble the dictionary
-            Node node = new Node(partTransform, neighbours);
-            transformNodeDictionary.Add(partTransform, node);
-            
-            nodes.Add(node);
+            // Find the current part's Node and replace it's neighbours
+            transformNodeDictionary[partTransform].SetNeighbours(neighbourNodes);
         }
         
-        return nodes;
     }
 
     private void LateUpdate()
@@ -315,9 +300,6 @@ public class Section : MonoBehaviour
     
     public async void IntegrityCheck(Transform destroyedPart)
     {
-        if(raycastOnStart)
-            Debug.LogWarning("Destroying node before raycast is complete!");
-        
         Debug.Log("Running integrity check for section " + gameObject.name + " of size " + parts.Count + " owning: " + destroyedPart);
         
         if (!transformNodeDictionary.ContainsKey(destroyedPart))
@@ -328,14 +310,16 @@ public class Section : MonoBehaviour
         var destroyedNode = transformNodeDictionary[destroyedPart]; // Get a temporary copy before removal
         
         // Remove the the node for the destroyedPart and references to it from other nodes
-        CleanupPartReferences(destroyedPart);
+        // CleanupPartReferences(destroyedPart);
         
         // Find all active neighbours
         var activeNeighbourNodes = new List<Node>();
         for (int i = 0; i < MAXAmountOfNeighbours; i++)
         {
-            if (destroyedNode.DoesNeighbourExist(i))
-                activeNeighbourNodes.Add(transformNodeDictionary[destroyedNode.neighbourTransforms[i]]);
+            var currentNeighbour = destroyedNode.Neighbours[i];
+            
+            if(currentNeighbour.active)
+                activeNeighbourNodes.Add(currentNeighbour);
         }
 
         switch (activeNeighbourNodes.Count)
@@ -350,6 +334,8 @@ public class Section : MonoBehaviour
                 return;
         }
 
+        /*
+        
         List<Node> nodesToRecalculate = FindPathBetweenParts(activeNeighbourNodes);
 
         if (nodesToRecalculate.Count == 0)
@@ -369,8 +355,11 @@ public class Section : MonoBehaviour
         }
         
         ConfigureNewSections(newSections);
+        */
     }
 
+    /*
+    
     // Test connection to every neighbour node by the power of the flood fill
     // A connection is rigid if even one way is found to each other
     // Returns a list of nodes that are compromised
@@ -627,30 +616,6 @@ public class Section : MonoBehaviour
         //}
     }
     
-    void PaintNewSections(List<(Node, Node)> compromisedNodes)
-    {
-        // All the compromised parts will be new parts of individual sections
-        // Run a non conditional flood fill for each group
-        
-        var newSections = new List<List<Transform>>();
-        
-        foreach (var node in compromisedNodes)
-        {
-            var newSection = new List<Transform>();
-            //NonConditionalFloodFill(node, ref newSection, new Dictionary<Node, bool>());
-            
-            newSections.Add(newSection);
-        }
-
-        foreach (var section in newSections)
-        {
-            Debug.Log("Section size: " + section.Count);
-        }
-        
-        //ConfigureNewSections(newSections);
-
-    }
-    
     async Task<List<Node>> NonConditionalFloodFillAsync(Node node, Dictionary<Node, bool> hasNodeBeenVisitedDic)
     {
         List<Node> foundNodes = new List<Node>();
@@ -729,6 +694,7 @@ public class Section : MonoBehaviour
         // If we did did this before, there could still be missing weapons from other sections
         //coreSection[0].centerTransform.GetComponentInParent<Section>().ReCalculateStats();
     }
+    */
     
     // Count all objects and figure dimensions based on their positions
     public ObjectDimensions CalculateShipDimensions()
@@ -753,332 +719,5 @@ public class Section : MonoBehaviour
         
         return new ObjectDimensions(up,down,right,left);
     }
-    
-    // VANHOJA FUNKTIOITA
-    
-    // Check if section has broken into pieces
-    /*
-    void OldIntegrityCheck(GameObject destroyedPart)
-    {
-        
-        //if (!masterConnectionDictionary.ContainsKey(destroyedPart))
-        //{
-        //    //Debug.LogWarning("No PartGroup found for part:" + destroyedPart.name);
-        //    Destroy(destroyedPart);
-        //    DestroyedParts.Remove(destroyedPart);
-        //    return;
-        //}
-        
-        // Lookup the right ConnectionGroup where the destroyed part was the master
-        var destroyedPartGroup = masterConnectionDictionary[destroyedPart];
-        
-        // After getting a copy of the part, destroy the real part along the group
-        // The next three lines can have cause errors when multiple objects are destroyed in a very short timespan
-        //connectionMap.Remove(masterConnectionDictionary[destroyedPart]);
-        if (masterConnectionDictionary.ContainsKey(destroyedPart)) masterConnectionDictionary.Remove(destroyedPart);
-        if (subordinateConnectionListDictionary.ContainsKey(destroyedPart)) subordinateConnectionListDictionary.Remove(destroyedPart);
-        DestroyedParts.Remove(destroyedPart);
-        Destroy(destroyedPart);
-        
-        // Check if destroyed partGroups subordinates have other masters
-        // If any of those subordinates don't have any subordinates or their own, that part is for sure detached
-        // If partgroub's subordinates happen to have their own subordinates, try to find a path to each other
-
-        Debug.Log("Subordinate count: " + subordinateConnectionListDictionary.Count);
-
-        var aliveSubordinates = new List<GameObject>();
-        for (var i = 0; i < destroyedPartGroup.subordinates.Length; i++)
-        {
-            if (destroyedPartGroup.subordinates[i] == null) continue;
-            aliveSubordinates.Add(destroyedPartGroup.subordinates[i]);
-        }
-
-        if (aliveSubordinates.Count == 0)
-        {
-            Debug.Log("No other nodes left.");
-            return;
-        }
-        
-        // A list to store all the valid paths
-        var connectedGroups = new List<List<PartGroup>>();
-        var partPathDictionary = new Dictionary<PartGroup, List<PartGroup>>(); // Each group knows which path it belongs in
-
-        var compromisedIntegrityGroups = new List<PartGroup>(); // Store a list of the groups that must be re-evaluated for integrity
-        
-        // Check if there is a valid path for the alive subordinates
-        for (var i = 0; i < aliveSubordinates.Count; i++)
-        {
-            for (var j = 0; j < aliveSubordinates.Count; j++)
-            {
-                if (i == j) continue; // Don't evaluate connections to the same group
-                   
-                var subordinateMasterGroup = masterConnectionDictionary[aliveSubordinates[i]];
-                var subordinateMasterGroup2 = masterConnectionDictionary[aliveSubordinates[j]];
-
-                // Before tracing the path, check if the path has been already found (one way or another)
-                bool pathAlreadyFound = false;
-                
-                // If groups point to the same list, they already belong to the same path
-                if(partPathDictionary.ContainsKey(subordinateMasterGroup) && partPathDictionary.ContainsKey(subordinateMasterGroup2)) 
-                    pathAlreadyFound = partPathDictionary[subordinateMasterGroup] == partPathDictionary[subordinateMasterGroup2];
-
-                if(pathAlreadyFound) continue; // Skip path finding if path already exists
-                
-                var didFindPath = FloodFillManager(ref subordinateMasterGroup, ref subordinateMasterGroup2);
-                
-                if (didFindPath)
-                {
-                    Debug.Log(subordinateMasterGroup.master.name + " and " + subordinateMasterGroup2.master.name + " are connected!");
-                    Debug.DrawLine(Vector3.zero, subordinateMasterGroup.master.transform.position, Color.magenta, 5f);
-                    Debug.DrawLine(Vector3.zero, subordinateMasterGroup2.master.transform.position, Color.magenta, 5f);
-                    
-                    // If one of the groups belong to a path, assign them both to the path
-                    if (partPathDictionary.ContainsKey(subordinateMasterGroup))
-                    {
-                        partPathDictionary[subordinateMasterGroup].Add(subordinateMasterGroup2);
-                        
-                        // Update the pointed list for group2
-                        partPathDictionary[subordinateMasterGroup2] = partPathDictionary[subordinateMasterGroup];
-                    }
-                    else if (partPathDictionary.ContainsKey(subordinateMasterGroup2))
-                    {
-                        partPathDictionary[subordinateMasterGroup2].Add(subordinateMasterGroup);
-                        
-                        // Update the pointed list for group1
-                        partPathDictionary[subordinateMasterGroup] = partPathDictionary[subordinateMasterGroup2];
-                    }
-                    else // Create a new path, add groups to the path and create entries for the dictionary
-                    {
-                        var newList = new List<PartGroup>() {subordinateMasterGroup, subordinateMasterGroup2};
-                        connectedGroups.Add(newList);
-                        
-                        // Create dictionary entries for both the groups
-                        partPathDictionary.Add(subordinateMasterGroup, newList);
-                        partPathDictionary.Add(subordinateMasterGroup2, newList);
-                    }
-                    
-                    
-                }
-                else
-                {
-                    Debug.Log(subordinateMasterGroup.master.name + " and " + subordinateMasterGroup2.master.name + " path not found!");
-                    // Add both of the groups to the volatilegroups because their integrity is compromised
-                    compromisedIntegrityGroups.Add(subordinateMasterGroup);
-                    compromisedIntegrityGroups.Add(subordinateMasterGroup2);
-                }
-            }
-        }
-
-        compromisedIntegrityGroups = compromisedIntegrityGroups.Distinct().ToList(); // List might contain duplicates
-        
-        if (compromisedIntegrityGroups.Count > 0)
-        {
-            Debug.Log("Found groups whichs integrity is compromised!");
-            PaintNewSections(compromisedIntegrityGroups);
-        }
-        else
-        {
-            Debug.Log("Integrity is OK");
-        }
-
-    }
-    */
-    /*
-    private Dictionary<Transform, List<Node>> AssembleTransformAsNeighborDictionary()
-    {
-        var dictionary = new Dictionary<Transform, List<Node>>();
-        
-        for (var i = 0; i < nodeMap.Count; i++)
-        {
-            var node1 = nodeMap[i];
-
-            foreach (var neighbourTransform in node1.neighbourTransforms)
-            {
-                if(!node1.activeNeighbourTransforms.TryGetValue(neighbourTransform, out var value)) continue;
-                
-                //for (var j = 0; j < nodeMap.Count; j++)
-                //{
-                //    if (i == j) continue; // Don't hassle with the same node
-                //
-                //    var node2 = nodeMap[j];
-                //
-                //    if (!node2.neighbourTransforms.Contains(neighbourTransform)) continue;
-                //
-                //    // Group 2 has the same subordinate as Group 1
-                //    // So add it as an entry if it isn't already there
-                //    // Otherwise just add a new value
-                //
-                //    if (dictionary.ContainsKey(neighbourTransform))
-                //    {
-                //        // Update value list
-                //        dictionary[neighbourTransform].Add(nodeMap[i]);
-                //        dictionary[neighbourTransform].Add(nodeMap[j]);
-                //        
-                //        // In case of duplicates, delete them
-                //        dictionary[neighbourTransform] =
-                //            dictionary[neighbourTransform].Distinct().ToList();
-                //    }
-                //    else
-                //    {
-                //        // Create a new entry and set both map1 and map2 as values
-                //        var list = new List<Node>() {nodeMap[i], nodeMap[j]};
-                //        dictionary.Add(neighbourTransform, list);
-                //    }
-                //}
-            }
-        }
-
-        return dictionary;
-    }
-    */
-    /*
-    List<GameObject> ReturnElementsThatOverlap(List<List<GameObject>> groups)
-    {
-        var overlappingElements = new List<GameObject>();
-        
-        foreach (var group in groups)
-        {
-            foreach (var gameObject in group)
-            {
-                foreach (var group2 in groups)
-                {
-                    if(group == group2) continue;
-                    
-                    var contains = group2.Any(val => val == gameObject);
-       
-                    if (contains)
-                    {
-                        //Debug.DrawLine(Vector3.zero, gameObject.transform.position, Color.magenta, 10f);
-                        overlappingElements.Add(gameObject);
-                    }
-                }
-            }
-        }
-        
-        overlappingElements = overlappingElements.Distinct().ToList();
-        return overlappingElements;
-    }
-
-    List<List<GameObject>> MergeGroupsWithOverlappingElements(List<List<GameObject>> groups)
-    {
-        var tempGroups = new List<List<GameObject>>(groups);
-        
-        for (var i = 0; i < groups.Count; i++)
-        {
-            // Go trough every element in group
-            foreach (var gameObject in groups[i])
-            {
-                for (var j = 0; j < groups.Count; j++)
-                {
-                    if (groups[i] == groups[j]) continue;
-                    
-                    if (groups[j].Contains(gameObject))
-                    {
-                        var mergedGroup = new List<GameObject>();
-                        mergedGroup.AddRange(groups[i]);
-                        mergedGroup.AddRange(groups[j]);
-                        mergedGroup = mergedGroup.Distinct().ToList();
-
-                        tempGroups[i] = mergedGroup; // Replace first one
-                        tempGroups.Remove(tempGroups[j]); // Delete second one
-                        //groups.Add(mergedGroup); // Add the merged group
-
-                        return tempGroups;
-
-                    }
-                }
-            }
-        }
-        
-        //var sharedOptions =
-        //    from option in groups.First( ).Distinct( )
-        //    where groups.Skip( 1 ).All( l => l.Contains( option ) )
-        //    select option;
-        
-        
-
-        /*
-        foreach (var group in groups)
-        {
-            foreach (var gameObject in group)
-            {
-                //foreach (var group2 in groups)
-                //{
-                //    //if(group == group2) continue;
-                //    //
-                //    //var mergedGroup = new List<GameObject>();
-                //    //
-                //    //var contains = group2.Any(val => val == gameObject);
-                //    //
-                //    //if (contains)
-                //    //{
-                //    //    mergedGroup.AddRange(group);
-                //    //    mergedGroup.AddRange(group2);
-                //    //    mergedGroup = mergedGroup.Distinct().ToList(); // Remove duplicates
-                //    //    
-                //    //    mergedGroups.Add(mergedGroup);
-                //    //}
-                //}
-            }
-        }
-        
-        return tempGroups;
-    }
-    
-    void ReAssignParts(List<List<GameObject>> groups)
-    {
-        // Find out the biggest group. That is the "core" of the ship that as most components
-        var maxCount = groups.Max(list => list.Count());
-        var coreSection = groups.First(list => list.Count() == maxCount);
-        
-        foreach (var group in groups)
-        {
-            // Skip the biggest one from reassigning parts
-            if (group == coreSection)
-                continue;
-            
-            // Create a section at the first element of the group
-            // var newSection = Instantiate(sectionPrefab, group[0].transform.position, group[0].transform.rotation);
-            var newSection = Instantiate(sectionPrefab, transform.position, transform.rotation);
-            
-            foreach (var gameObject in group)
-            {
-                // Remove object from parent section's part list
-                // So parent doesn't have any reference to detached parts
-
-                // Also remove from raycastGroups so we don't have to raycast again
-                //for (int i = 0; i < rayCastGroups.Count; i++)
-                //{
-                //    if (rayCastGroups[i].Contains(gameObject))
-                //        rayCastGroups.RemoveAt(i);
-                //}
-
-                //Debug.Log(rayCastGroups.Count);
-                
-                parts.Remove(gameObject.GetComponent<Part>());
-                
-                // Change layer to default to enable collisions
-                gameObject.layer = LayerMask.NameToLayer("Default");
-                
-                // Change parent to a new section to simulate it's own physics
-                gameObject.transform.SetParent(newSection.transform);
-            }
-            
-            // When group is reassigned, recalculate mass, health, weapons for the new section
-            group[0].GetComponentInParent<Section>().Start();
-            
-            // Group detached from parent and currently it doesn't have any velocity
-            // So match the values from parent RigidBody2D
-            group[0].GetComponentInParent<Rigidbody2D>().velocity = _rigidbody2D.velocity;
-            group[0].GetComponentInParent<Rigidbody2D>().angularVelocity = _rigidbody2D.angularVelocity;
-        }
-        
-        // Recalculate the biggest "core" section's mass, health, weapons
-        // If we did did this before, there could still be missing weapons from other sections
-        coreSection[0].GetComponentInParent<Section>().ReCalculateStats();
-    }
-    
-    */
-    
     
 }
