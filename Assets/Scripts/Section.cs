@@ -33,11 +33,11 @@ public class Node
     private readonly Vector2 transformPosition; // Save a copy of the initial position for equality checks
 
     // A linked list going to 4 directions
-    // A node always has all 4 neighbours but only valid ones will be active
+    // A node is guaranteed to always have 4 neighbours but only some of them are active and real
     public Node[] Neighbours { get; private set; }
     
-    // Before anything is done with the node, isActive must be checked first
-    // Otherwise there won't be any savings because we have to perform a UnityEngine.Object null check
+    // Before anything is done with the node, active should obviously be checked first
+    // Null checking the transform itself is unneeded and costly for real time operations
     public bool active;
 
     private static int _maxNeighbours = 4;
@@ -76,9 +76,9 @@ public class Node
 
 public class Section : MonoBehaviour
 {
-    private List<Node> nodes = new List<Node>();
-    
-    private Dictionary<Transform, Node> transformNodeDictionary = new Dictionary<Transform, Node>();
+    private List<Node> nodes;
+
+    private Dictionary<Transform, Node> transformNodeDictionary;
 
     private GameObject sectionPrefab;
     
@@ -118,6 +118,9 @@ public class Section : MonoBehaviour
     // Already created and damaged sections must preserve valuable data such as max hp
     public void Start()
     {
+        nodes = new List<Node>();
+        transformNodeDictionary = new Dictionary<Transform, Node>();
+        
         sectionPrefab = Resources.Load<GameObject>("Section");
         
         _rigidbody2D = GetComponent<Rigidbody2D>();
@@ -307,10 +310,9 @@ public class Section : MonoBehaviour
             Debug.LogWarning("No " + destroyedPart.name + " part in dictionary for " + gameObject.name);
             return;
         }
-        var destroyedNode = transformNodeDictionary[destroyedPart]; // Get a temporary copy before removal
         
-        // Remove the the node for the destroyedPart and references to it from other nodes
-        // CleanupPartReferences(destroyedPart);
+        var destroyedNode = transformNodeDictionary[destroyedPart]; // Get a temporary copy before removal
+        destroyedNode.active = false;
         
         // Find all active neighbours
         var activeNeighbourNodes = new List<Node>();
@@ -322,6 +324,8 @@ public class Section : MonoBehaviour
                 activeNeighbourNodes.Add(currentNeighbour);
         }
 
+        CleanupPartReferences(destroyedPart);
+        
         switch (activeNeighbourNodes.Count)
         {
             // If there are no neighbours, there is nothing left so no integrity to check
@@ -333,8 +337,6 @@ public class Section : MonoBehaviour
                 Debug.Log("Integrity OK");
                 return;
         }
-
-        /*
         
         List<Node> nodesToRecalculate = FindPathBetweenParts(activeNeighbourNodes);
 
@@ -348,17 +350,15 @@ public class Section : MonoBehaviour
         Debug.Log("Integrity compromised. Recalculating sections.");
         
         List<List<Node>> newSections = await RecalculateSections(nodesToRecalculate);
-
+        
         foreach (var section in newSections)
         {
             Debug.Log("Section size: " + section.Count);
         }
         
         ConfigureNewSections(newSections);
-        */
+        
     }
-
-    /*
     
     // Test connection to every neighbour node by the power of the flood fill
     // A connection is rigid if even one way is found to each other
@@ -389,13 +389,13 @@ public class Section : MonoBehaviour
                     {
                         case 1: // Connection can be deduced to be true
                         {
-                            Debug.Log("Deduced path to be true for " + activeNeighbourNodes[i].centerTransform.name + " and " + activeNeighbourNodes[j].centerTransform.name);
+                            Debug.Log("Deduced path to be true for " + activeNeighbourNodes[i].transform.name + " and " + activeNeighbourNodes[j].transform.name);
                             foundPath = true;
                             goto skipPathFinding;
                         }
                         case 0: // Connection can be deduced to be false
                         {
-                            Debug.Log("Deduced path to be false for " + activeNeighbourNodes[i].centerTransform.name + " and " + activeNeighbourNodes[j].centerTransform.name);
+                            Debug.Log("Deduced path to be false for " + activeNeighbourNodes[i].transform.name + " and " + activeNeighbourNodes[j].transform.name);
                             foundPath = false;
                             goto skipPathFinding;
                         }
@@ -417,17 +417,17 @@ public class Section : MonoBehaviour
                     var nodeTuple = (activeNeighbourNodes[i], activeNeighbourNodes[j]);
                     connections.Add(nodeTuple);
                     
-                    Debug.Log("Found path between " + activeNeighbourNodes[i].centerTransform.name + " and " 
-                              + activeNeighbourNodes[j].centerTransform.name);
-                    Debug.DrawLine(Vector3.zero, activeNeighbourNodes[i].centerTransform.position, Color.magenta);
-                    Debug.DrawLine(Vector3.zero, activeNeighbourNodes[j].centerTransform.position, Color.magenta);
+                    Debug.Log("Found path between " + activeNeighbourNodes[i].transform.name + " and " 
+                              + activeNeighbourNodes[j].transform.name);
+                    Debug.DrawLine(Vector3.zero, activeNeighbourNodes[i].transform.position, Color.magenta);
+                    Debug.DrawLine(Vector3.zero, activeNeighbourNodes[j].transform.position, Color.magenta);
                 }
                 else
                 {
                     compromisedConnections.Add((activeNeighbourNodes[i], activeNeighbourNodes[j]));
 
-                    Debug.Log("No path found between " + activeNeighbourNodes[i].centerTransform.name + " and " 
-                              + activeNeighbourNodes[j].centerTransform.name);
+                    Debug.Log("No path found between " + activeNeighbourNodes[i].transform.name + " and " 
+                              + activeNeighbourNodes[j].transform.name);
                 }
                 
                 // Add combinations both ways because a connection can be made both ways
@@ -493,47 +493,30 @@ public class Section : MonoBehaviour
 
         return importantNodeList;
     }
-
+    
+    // Remove the node, disable the transform and other references
     void CleanupPartReferences(Transform partTransform, bool changeOwnership = false)
     {
         // If has a child and that child has a Weapon component
         if (partTransform.childCount != 0 && partTransform.GetChild(0).TryGetComponent<Weapon>(out var weapon))
         {
+            Debug.Log("Weapon found!");
             weapons.Remove(weapon);
         }
         
         Part part = partTransform.GetComponent<Part>();
         shipHp -= part.MaxHP; // Remove hp value from mother section
         
-        if(changeOwnership) // Reassign parent section
+        if(changeOwnership)
             part.Start();
         
         parts.Remove(partTransform.GetComponent<Part>());
-
-        // Remove all neighbours' reference to this part
-        // After this, all neighbours still technically have a reference to the transform
-        // Only the null-safe array is updated to contain only safe values
-        var node = transformNodeDictionary[partTransform];
-        for (int i = 0; i < MAXAmountOfNeighbours; i++)
-        {
-            if (!node.DoesNeighbourExist(i)) continue;
-            
-            var neighbourNode = transformNodeDictionary[node.neighbourTransforms[i]];
-            
-            var indexOfDestroyedPartInNeighbourNode = neighbourNode.indexOfNeighbour[partTransform]; // Lookup the index instead of looping
-            neighbourNode.neighbourExists[indexOfDestroyedPartInNeighbourNode] = false;
-        }
         
-        nodeMap.Remove(transformNodeDictionary[partTransform]);
-        
-        // Remove the transform's key to the node dictionary
-        transformNodeDictionary.Remove(partTransform);
-        
-        // Finally disable the object
+        // Finally disable the game object carrying the transform
         if(!changeOwnership)
             partTransform.gameObject.SetActive(false);
     }
-
+    
     // Use flood fill to determine which parts belong to the new section
     async Task<List<List<Node>>> RecalculateSections(List<Node> nodes)
     {
@@ -543,13 +526,13 @@ public class Section : MonoBehaviour
         {
             tasks.Add(NonConditionalFloodFillAsync(node, new Dictionary<Node, bool>()));
         }
-
+    
         var sections = new List<List<Node>>();
         foreach (var task in await Task.WhenAll(tasks))
         {
             sections.Add(task);
         }
-
+    
         return sections;
     }
     
@@ -570,9 +553,9 @@ public class Section : MonoBehaviour
 
             for (var i = 0; i < MAXAmountOfNeighbours; i++)
             {
-                if (!node1.neighbourExists[i]) continue; // Skip if not a valid node
+                if (!node1.Neighbours[i].active) continue; // Skip if not an active node
 
-                nextNode = transformNodeDictionary[node1.neighbourTransforms[i]];
+                nextNode = node1.Neighbours[i];
 
                 // It this node happens to be the node we are looking for
                 if (nextNode == node2)
@@ -588,32 +571,6 @@ public class Section : MonoBehaviour
                 }
             }
         }
-        
-        // Flag this group as visited
-        // Also add it to returned GameObjects
-        //if (!hasNodeBeenVisitedDic.ContainsKey(node1))
-        //{
-        //    hasNodeBeenVisitedDic.Add(node1, true);
-        //}
-        //
-        //for (var i = 0; i < MAXAmountOfNeighbours; i++)
-        //{
-        //    if (!node1.neighbourExists[i]) continue; // Skip if not a valid node
-        //
-        //    var nextNode = transformNodeDictionary[node1.neighbourTransforms[i]];
-        //    
-        //    // It this node happens to be the node we are looking for
-        //    if (nextNode == node2)
-        //    {
-        //        foundPathToNode = true;
-        //        return;
-        //    }
-        //    
-        //    if (!hasNodeBeenVisitedDic.ContainsKey(nextNode))
-        //    {
-        //        ConditionalFloodFill(nextNode, node2, ref foundPathToNode, hasNodeBeenVisitedDic);
-        //    }
-        //}
     }
     
     async Task<List<Node>> NonConditionalFloodFillAsync(Node node, Dictionary<Node, bool> hasNodeBeenVisitedDic)
@@ -638,9 +595,9 @@ public class Section : MonoBehaviour
 
                 for (var i = 0; i < MAXAmountOfNeighbours; i++)
                 {
-                    if (!node.neighbourExists[i]) continue; // Skip if not a valid node
+                    if (!node.Neighbours[i].active) continue; // Skip if not an active node
 
-                    nextNode = transformNodeDictionary[node.neighbourTransforms[i]];
+                    nextNode = node.Neighbours[i];
 
                     if (!hasNodeBeenVisitedDic.ContainsKey(nextNode))
                     {
@@ -657,44 +614,45 @@ public class Section : MonoBehaviour
         return foundNodes;
     }
     
+    
     void ConfigureNewSections(List<List<Node>> newSections)
     {
-        // Find out the biggest group. That is the "core" of the ship that as most components
+        // Find out the biggest group. That is the "core" of the ship that has player/ai in control
         var maxCount = newSections.Max(list => list.Count());
         var coreSection = newSections.First(list => list.Count() == maxCount);
 
         foreach (var section in newSections)
         {
             if (section == coreSection) continue;
-                
-            var newSection = Instantiate(sectionPrefab, transform.position, transform.rotation);
+
+            var transformCache = transform;
+            var newSection = Instantiate(sectionPrefab, transformCache.position, transformCache.rotation);
             
             foreach (var node in section)
             {
                 // Change parent to a new section to simulate it's own physics
-                node.centerTransform.SetParent(newSection.transform);
+                node.transform.SetParent(newSection.transform);
                 
                 // Remove references to core section dictionaries
-                CleanupPartReferences(node.centerTransform, changeOwnership:true);
+                CleanupPartReferences(node.transform, changeOwnership:true);
                 
-                // Change layer to default to enable collisions
-                node.centerTransform.gameObject.layer = LayerMask.NameToLayer("Default");
+                // Change layer to default to enable collisions with the new detached section
+                node.transform.gameObject.layer = LayerMask.NameToLayer("Default");
             }
             
-            // When group is reassigned, recalculate mass, health, weapons for the new section
-            section[0].centerTransform.GetComponentInParent<Section>().Start();
+            // When group is reassigned, reassemble it's hp, weapons and raycast again for legal structure
+            section[0].transform.GetComponentInParent<Section>().Start();
             
             // Group detached from parent and currently it doesn't have any velocity
             // So match the values from parent RigidBody2D
-            section[0].centerTransform.GetComponentInParent<Rigidbody2D>().velocity = _rigidbody2D.velocity;
-            section[0].centerTransform.GetComponentInParent<Rigidbody2D>().angularVelocity = _rigidbody2D.angularVelocity;
+            section[0].transform.GetComponentInParent<Rigidbody2D>().velocity = _rigidbody2D.velocity;
+            section[0].transform.GetComponentInParent<Rigidbody2D>().angularVelocity = _rigidbody2D.angularVelocity;
         }
         
         // Recalculate the biggest "core" section's mass, health, weapons
         // If we did did this before, there could still be missing weapons from other sections
         //coreSection[0].centerTransform.GetComponentInParent<Section>().ReCalculateStats();
     }
-    */
     
     // Count all objects and figure dimensions based on their positions
     public ObjectDimensions CalculateShipDimensions()
