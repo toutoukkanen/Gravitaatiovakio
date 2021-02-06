@@ -10,6 +10,7 @@ It took me one month to reach the state as it is now when writing this.
 It is a short game and it might be rough around the edges but there are many cool
 mechanics that gave me a real challenge and a great time when developing them.
 
+The repo contains every necessary file to build this in the Unity game engine, preferably from version 2020.2 and up.
 If you have anything to say or suggest, please contact me. I'm always eager to learn more.
 
 ## Mechanical overview
